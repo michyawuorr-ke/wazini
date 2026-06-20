@@ -51,6 +51,29 @@ const config: ExpoConfig = {
         color: "#1A1A1A",
       },
     ],
+    [
+      "expo-build-properties",
+      {
+        android: {
+          // Explicitly capped at API 34 (Android 14) rather than
+          // whatever Expo SDK 56 defaults to. This was added during
+          // real-device install debugging: aapt confirmed the
+          // uncapped build declared targetSdkVersion 36 (Android 16 /
+          // "Baklava"), a very recently finalized API level. Multiple
+          // physical devices (different manufacturers, different
+          // Android versions, both well above any reasonable minSdk)
+          // failed to install with a generic "App not installed" and
+          // no specific error surfaced anywhere — capping to a
+          // long-established, universally-supported API level
+          // sidesteps the question of whether 36 itself was the cause,
+          // rather than requiring it to be conclusively proven.
+          // Revisit this cap once API 36 has wider real-device
+          // adoption and tooling maturity.
+          targetSdkVersion: 34,
+          compileSdkVersion: 34,
+        },
+      },
+    ],
   ],
 
   extra: {
