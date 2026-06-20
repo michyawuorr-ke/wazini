@@ -7,6 +7,8 @@ interface VerifiedFlashProps {
   amount: number;
   /** Distinguishes "the system caught this automatically" from a manual tap — see SPEC.md UX flow. */
   source: "manual" | "sms_auto" | "sms_picker";
+  /** True if this was queued for later sync rather than written immediately — see docs/SPEC.md section 13 (offline-first design). */
+  queued: boolean;
   onDone: () => void;
 }
 
@@ -24,11 +26,20 @@ const SOURCE_COPY: Record<VerifiedFlashProps["source"], string> = {
  * the barber gets the same reassurance regardless of which path resolved
  * the payment — automation should never feel like it's hiding what
  * happened.
+ *
+ * When `queued` is true (no connectivity right now), the headline still
+ * reads as a confirmation — the barber's action genuinely succeeded
+ * locally — but a small subtext makes the sync-pending state visible
+ * rather than silently hidden. Per the "zero confusion" design law, an
+ * invisible offline queue would be worse than a visible one, even
+ * though it adds one more line of text to the one screen meant to stay
+ * maximally simple.
  */
 export default function VerifiedFlash({
   customerName,
   amount,
   source,
+  queued,
   onDone,
 }: VerifiedFlashProps) {
   const scale = useRef(new Animated.Value(0.85)).current;
@@ -50,7 +61,7 @@ export default function VerifiedFlash({
           useNativeDriver: true,
         }),
       ]),
-      Animated.delay(1100),
+      Animated.delay(queued ? 1600 : 1100),
       Animated.timing(opacity, {
         toValue: 0,
         duration: 220,
@@ -75,6 +86,7 @@ export default function VerifiedFlash({
         <Text style={styles.headline}>{SOURCE_COPY[source]}</Text>
         <Text style={styles.amount}>KES {amount.toLocaleString()}</Text>
         <Text style={styles.subtext}>{customerName}</Text>
+        {queued && <Text style={styles.queuedNote}>Will sync when back online</Text>}
       </Animated.View>
     </Animated.View>
   );
@@ -125,5 +137,10 @@ const styles = StyleSheet.create({
   subtext: {
     ...typography.body,
     color: colors.textSecondary,
+  },
+  queuedNote: {
+    ...typography.caption,
+    color: colors.amber,
+    marginTop: spacing.sm,
   },
 });

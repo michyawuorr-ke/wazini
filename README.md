@@ -158,3 +158,15 @@ This starts Metro bundler from Termux; the installed dev-client app on your phon
 - **SMS listener is not yet a true Android foreground service.** Per the architecture spec, a persistent-notification foreground service is the more battery-optimization-resistant option (especially on Xiaomi/Tecno/Itel devices common in Kenya). The current implementation listens while the app process is alive but hasn't been upgraded to survive aggressive background killing. The manual confirm flow exists specifically to make this gap non-fatal. Tracked as a follow-up.
 - **No real per-barber authentication.** RLS policies currently allow any holder of the anon key to read/write any shop's data, scoped only by knowing the shop's UUID. Documented explicitly in `003_rls_policies.sql` with the upgrade path. Acceptable for single-shop MVP testing; not acceptable before real multi-shop production use.
 - **SMS regex is calibrated against a small number of sample message formats**, not validated against Safaricom's full format variation. Expect to need real-world calibration once tested against live Till payments.
+- **Supabase Realtime's reconnection behavior after the phone sleeps or the app is backgrounded for an extended period has not been verified on a real device.** The subscription logic compiles and is structurally sound, but — same category of risk as the SMS listener — Android's aggressive background-process management on common device brands needs real-world verification, not just a clean compile.
+
+## Offline-first design
+
+Two real constraints shaped this, beyond the initial online-only MVP:
+
+1. Customers frequently have no data/WiFi at all — fixed via **manual check-in** (`ManualCheckinScreen`, reachable from the "+" button on the Business tab), which lets the barber record a walk-in directly, bypassing the web check-in entirely.
+2. The barber's own connection also drops — fixed via an **offline write queue** (`src/offline/`) that locally stores check-in/verify/void actions when offline and automatically replays them once connectivity returns, with per-action-type idempotency so a crash-mid-sync can never double-count revenue.
+3. The Business tab queue updates **instantly** via a **Supabase Realtime subscription** — no manual refresh needed for new check-ins or payment confirmations, from any source (web app, SMS-auto-match, another device).
+
+Full design rationale: `docs/SPEC.md` section 13.
+

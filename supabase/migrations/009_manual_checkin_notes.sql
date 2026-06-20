@@ -1,0 +1,12 @@
+-- manual_checkin uses `security definer`, same as verify_session/
+-- void_session — it runs with the privileges of the function owner,
+-- not the calling anon role, which is what allows it to write to
+-- customer/session despite the MVP RLS policies being permissive but
+-- still nominally gated. This matches the existing pattern from
+-- 002_functions.sql and carries the same upgrade-before-production
+-- note documented in 003_rls_policies.sql.
+--
+-- No new RLS policy is needed for this migration — manual_checkin
+-- writes through the function (security definer bypasses RLS for its
+-- own operations), and the underlying customer/session tables already
+-- have their anon-access policies from 003_rls_policies.sql.

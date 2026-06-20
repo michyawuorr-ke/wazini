@@ -1,5 +1,12 @@
 import { supabase } from "./supabase";
 import type { SessionWithCustomer, Customer, Shop, ServicePrice } from "../types/domain";
+import { enqueueAction } from "../offline/queue";
+import NetInfo from "@react-native-community/netinfo";
+
+async function isCurrentlyOnline(): Promise<boolean> {
+  const state = await NetInfo.fetch();
+  return !!state.isConnected && state.isInternetReachable !== false;
+}
 
 /**
  * Fetches all sessions currently awaiting payment for a shop — this is
@@ -29,14 +36,17 @@ export async function getAwaitingSessions(
  * Verifies a session — the single state transition that powers both the
  * manual "M-Pesa / Cash, Confirm" flow and the SMS auto-match flow.
  *
- * This intentionally does NOT touch revenue_entry or customer directly —
- * those are derived. In production this should be a single Postgres
- * function/RPC (`verify_session`) so the session update, revenue_entry
- * insert, and customer denormalized-field update happen atomically. The
- * client-side version below is the MVP placeholder; see SPEC.md "Source
- * of truth rules" for why this matters — multi-step client writes risk
- * partial failure (session marked VERIFIED but revenue_entry never
- * created), which a single DB function eliminates.
+ * OFFLINE-AWARE: if the device has no connectivity right now, this
+ * queues the verification instead of failing outright — see
+ * docs/SPEC.md section 13 ("Offline-First Design"). The barber's
+ * confirmation UX (the VerifiedFlash moment) still fires immediately
+ * either way; the difference is invisible to the barber except for a
+ * sync-status indicator, by design — payment confirmation can't feel
+ * like it failed just because the network is down at that instant.
+ *
+ * Returns { queued: true } when the action was queued rather than
+ * written immediately, so calling code can adjust copy if needed
+ * (e.g. "Confirmed — will sync when online" vs "Confirmed").
  */
 export async function verifySession(params: {
   sessionId: string;
@@ -44,7 +54,20 @@ export async function verifySession(params: {
   amountPaid: number;
   mpesaCode?: string | null;
   verificationSource: "manual" | "sms_auto" | "sms_picker";
-}): Promise<void> {
+}): Promise<{ queued: boolean }> {
+  const online = await isCurrentlyOnline();
+
+  if (!online) {
+    await enqueueAction("verify_session", {
+      sessionId: params.sessionId,
+      paymentMode: params.paymentMode,
+      amountPaid: params.amountPaid,
+      mpesaCode: params.mpesaCode ?? null,
+      verificationSource: params.verificationSource,
+    });
+    return { queued: true };
+  }
+
   const { error } = await supabase.rpc("verify_session", {
     p_session_id: params.sessionId,
     p_payment_mode: params.paymentMode,
@@ -53,19 +76,111 @@ export async function verifySession(params: {
     p_verification_source: params.verificationSource,
   });
 
-  if (error) throw error;
+  if (error) {
+    // The write was attempted but failed for a reason OTHER than being
+    // offline (e.g. a genuine network blip mid-request) — fall back to
+    // queueing rather than surfacing a hard error to the barber. This
+    // is deliberately generous: a failed write and "no connectivity"
+    // can look identical from the client's perspective in practice.
+    await enqueueAction("verify_session", {
+      sessionId: params.sessionId,
+      paymentMode: params.paymentMode,
+      amountPaid: params.amountPaid,
+      mpesaCode: params.mpesaCode ?? null,
+      verificationSource: params.verificationSource,
+    });
+    return { queued: true };
+  }
+
+  return { queued: false };
 }
 
 export async function voidSession(
   sessionId: string,
   reason: string
-): Promise<void> {
+): Promise<{ queued: boolean }> {
+  const online = await isCurrentlyOnline();
+
+  if (!online) {
+    await enqueueAction("void_session", { sessionId, reason });
+    return { queued: true };
+  }
+
   const { error } = await supabase.rpc("void_session", {
     p_session_id: sessionId,
     p_reason: reason,
   });
 
-  if (error) throw error;
+  if (error) {
+    await enqueueAction("void_session", { sessionId, reason });
+    return { queued: true };
+  }
+
+  return { queued: false };
+}
+
+/**
+ * Creates a session directly from the barber's app, bypassing the
+ * customer web check-in entirely. Exists specifically for customers
+ * with no data/WiFi at all — see migration 008_manual_checkin.sql and
+ * docs/SPEC.md section 13 for the full rationale.
+ *
+ * Also offline-aware: if the barber's OWN connection is down at the
+ * moment of check-in, this queues the action rather than blocking the
+ * walk-in customer from being recorded at all.
+ */
+export async function manualCheckin(params: {
+  shopId: string;
+  customerPhone: string;
+  customerName: string;
+  serviceName: string;
+  amountExpected: number;
+  paymentType: "till" | "paybill";
+  paymentNumber: string;
+  paybillAccount?: string | null;
+}): Promise<{ queued: boolean; sessionId: string | null }> {
+  // Session code generation happens client-side here (rather than
+  // server-side as with the web check-in flow) specifically so it
+  // works identically whether online or queued offline — a queued
+  // action can't wait for a server round-trip to learn its own code.
+  const sessionCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+  const online = await isCurrentlyOnline();
+  const payload = {
+    shopId: params.shopId,
+    customerPhone: params.customerPhone,
+    customerName: params.customerName,
+    serviceName: params.serviceName,
+    amountExpected: params.amountExpected,
+    paymentType: params.paymentType,
+    paymentNumber: params.paymentNumber,
+    paybillAccount: params.paybillAccount ?? null,
+    sessionCode,
+  };
+
+  if (!online) {
+    await enqueueAction("manual_checkin", payload);
+    return { queued: true, sessionId: null };
+  }
+
+  const { data, error } = await supabase.rpc("manual_checkin", {
+    p_shop_id: payload.shopId,
+    p_customer_phone: payload.customerPhone,
+    p_customer_name: payload.customerName,
+    p_service_name: payload.serviceName,
+    p_amount_expected: payload.amountExpected,
+    p_payment_type: payload.paymentType,
+    p_payment_number: payload.paymentNumber,
+    p_paybill_account: payload.paybillAccount,
+    p_session_code: payload.sessionCode,
+  });
+
+  if (error) {
+    await enqueueAction("manual_checkin", payload);
+    return { queued: true, sessionId: null };
+  }
+
+  return { queued: false, sessionId: data as string };
 }
 
 export async function getCustomers(shopId: string): Promise<Customer[]> {
@@ -194,6 +309,7 @@ export async function deactivateServicePrice(id: string): Promise<void> {
 
   if (error) throw error;
 }
+/** Logs every intercepted SMS for audit/dispute-resolution — see SPEC.md sms_event rationale. */
 export async function logSmsEvent(params: {
   shopId: string;
   rawText: string;

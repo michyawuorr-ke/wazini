@@ -237,3 +237,44 @@ If a shop eventually qualifies for and obtains real Daraja/STK Push API access:
 - `AWAITING_PAYMENT → VERIFIED` gets a second trigger: a webhook matching `amount_expected` + till number, instead of the barber's tap or the SMS listener.
 - `mpesa_code` becomes system-populated instead of barber-typed or SMS-parsed.
 - No schema change required — `payment_mode` and `mpesa_code` already exist for this. Only a new webhook endpoint is needed; the state machine's shape doesn't change.
+
+---
+
+## 13. Offline-First Design & Live Updates
+
+Two related but distinct real-world constraints drove this section, surfaced after the initial build:
+
+1. **Customers walking into a barbershop frequently have no mobile data or WiFi at all.** There is no web-technology fix for a device with zero connectivity trying to load a page for the first time — this is a hard physical limit, not a design gap.
+2. **The barber's own connection also drops often.** This one IS fixable with proper offline-first engineering.
+3. **The barber should never need to manually refresh to see a new check-in or a payment that just got confirmed** — by any path, on any device.
+
+### 13.1 Manual check-in (the fix for constraint 1)
+
+Since a customer with zero connectivity cannot be the one making the network call, the fix is structural: the **barber's own phone** (this app) can create a session directly, bypassing the customer web check-in entirely. See `migration 008_manual_checkin.sql` and `ManualCheckinScreen.tsx`. This is a parallel entry point into the exact same `customer`/`session` model — everything downstream (matching engine, verification, revenue tracking, financial signal layer) works identically regardless of which path created the session.
+
+The `manual_checkin()` database function is itself idempotent: a duplicate call against an already-open session returns the existing session rather than erroring, which matters because of 13.2 below.
+
+### 13.2 Offline write queue (the fix for constraint 2)
+
+When the barber's own connection is down, three actions need to keep working anyway: manual check-in, verify session, void session. See `src/offline/queue.ts` and `src/offline/sync.ts`.
+
+**Design:**
+- Each action is stored locally (AsyncStorage) with a client-generated `localId`, a payload, and an attempt counter.
+- `useNetworkStatus.ts` detects connectivity changes and automatically drains the queue when the device comes back online, with a 60-second periodic safety-net sync as a backstop for the (documented, real) cases where a connectivity-change event is missed by the OS — the same category of Android-OEM background-process unreliability already flagged for the SMS listener.
+- **Idempotency is handled per-action-type**, not generically, because each underlying DB function has different "already done" semantics:
+  - `manual_checkin`: idempotent by design (see 13.1).
+  - `verify_session` / `void_session`: the DB functions raise a specific exception when a session is no longer in a state that permits the action (e.g. already `VERIFIED`). The sync layer detects that specific exception message and treats it as a successful no-op rather than a real failure to retry — this is what prevents a crash-mid-sync from double-applying a verification (which would otherwise create a duplicate `revenue_entry` and double-count revenue, a direct violation of the integrity invariant in section 5).
+- An action that fails 10 times in a row is logged and dropped rather than retried forever — a deliberate, documented tradeoff (an action with a permanently malformed payload, e.g. from a bug, would otherwise block all future sync attempts indefinitely).
+- The barber's confirmation UX (`VerifiedFlash`) fires identically whether a write succeeded immediately or was queued — with a small "will sync when back online" subtext in the queued case, so the offline state is visible rather than silently hidden, per the "zero confusion" design law.
+
+**What this deliberately does NOT do:** queue customer-facing web check-ins. A browser genuinely cannot queue "load this page" while offline for a first-time visitor — that gap is closed by manual check-in (13.1), not by trying to make the web app work with zero connectivity.
+
+### 13.3 Live updates via Supabase Realtime
+
+Separately from the offline queue, the Business tab queue needed to update **instantly** when anything changes — a new check-in (from the web app, or from manual check-in), or a payment verified through any path (SMS-auto-match, manual confirm, or even a second barber device) — without the barber ever pulling to refresh.
+
+`useSessionRealtimeSubscription.ts` subscribes to Postgres changes on the `session` table, scoped to the current shop (`migration 010_enable_realtime.sql` adds the table to Supabase's realtime publication, required and not automatic). On any insert/update/delete, it triggers a debounced re-fetch of the full awaiting-payment queue, rather than trying to hand-patch a single row into local state — `postgres_changes` payloads don't include joined data (no customer name/phone), so a full re-fetch is simpler and less bug-prone than partial in-place merging.
+
+This is intentionally a *separate* mechanism from the offline queue and the SMS-match flow — it doesn't drive any writes, it only reacts to the *result* of a write reaching the database, regardless of which path produced it. That separation is what makes the queue view correct even in scenarios this single app instance has no other way of knowing about.
+
+**Known limitation, stated plainly rather than assumed solved:** this has not yet been verified against real on-device conditions — specifically, Realtime's reconnection behavior after the phone sleeps or the app is backgrounded for an extended period is untested. This is the same category of risk already flagged for the SMS listener (Android's aggressive background-process management on common Kenyan device brands) and should be verified during real device testing, not assumed correct from compiling cleanly.

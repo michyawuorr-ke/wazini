@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -14,6 +14,9 @@ import SessionRow from "../components/SessionRow";
 import MpesaCodeModal from "../components/MpesaCodeModal";
 import AmbiguousMatchPicker from "../components/AmbiguousMatchPicker";
 import VerifiedFlash from "../components/VerifiedFlash";
+import SyncStatusBanner from "../components/SyncStatusBanner";
+import { useNetworkStatus } from "../offline/useNetworkStatus";
+import { useSessionRealtimeSubscription } from "../hooks/useSessionRealtimeSubscription";
 import { colors, spacing, typography } from "../theme/tokens";
 import { getAwaitingSessions, verifySession } from "../lib/sessions";
 import { recomputeTodaySnapshot } from "../lib/businessSignals";
@@ -26,6 +29,7 @@ interface VerifiedFlashState {
   customerName: string;
   amount: number;
   source: VerificationSource;
+  queued: boolean;
 }
 
 export default function BusinessScreen(_props: ScreenProps<"Business">) {
@@ -41,6 +45,8 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
     amount: number;
   } | null>(null);
   const [verifiedFlash, setVerifiedFlash] = useState<VerifiedFlashState | null>(null);
+
+  const networkStatus = useNetworkStatus();
 
   const loadSessions = useCallback(async (currentShopId: string) => {
     try {
@@ -69,6 +75,23 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
     }, [shopId, loadSessions])
   );
 
+  // Live updates — pushes new check-ins and any status change into the
+  // queue instantly, with zero manual refresh. See
+  // useSessionRealtimeSubscription.ts for why this re-fetches the full
+  // queue rather than trying to patch a single row in place: realtime
+  // payloads don't include joined customer data, and re-fetching is
+  // simpler and less bug-prone than hand-merging partial updates.
+  // Debounced slightly since a burst of events (e.g. a check-in
+  // immediately followed by an SMS-triggered verify) would otherwise
+  // trigger back-to-back redundant fetches.
+  const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useSessionRealtimeSubscription(shopId, () => {
+    if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+    realtimeDebounceRef.current = setTimeout(() => {
+      if (shopId) loadSessions(shopId);
+    }, 250);
+  });
+
   const handleRefresh = async () => {
     if (!shopId) return;
     setRefreshing(true);
@@ -84,7 +107,7 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
     source: VerificationSource
   ) => {
     try {
-      await verifySession({
+      const { queued } = await verifySession({
         sessionId: session.id,
         paymentMode,
         amountPaid,
@@ -94,18 +117,24 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
 
       // Optimistically drop it from the local queue immediately —
       // per SPEC.md offline-resilience note, the UI should update before
-      // waiting on a round-trip when possible.
+      // waiting on a round-trip when possible. This happens whether the
+      // write went through immediately or was queued for later sync —
+      // the barber's queue view always reflects "is the barber done with
+      // this customer," not "has this synced to the server yet."
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
       setVerifiedFlash({
         customerName: session.customer.name,
         amount: amountPaid,
         source,
+        queued,
       });
 
-      // Keep today's business signal snapshot current. Fire-and-forget —
-      // never block the barber's confirmation UX on this; see
-      // businessSignals.ts for why a failure here is non-fatal.
-      if (shopId) recomputeTodaySnapshot(shopId);
+      // Keep today's business signal snapshot current. Fire-and-forget,
+      // and skipped entirely when queued — recomputing a snapshot from
+      // data that hasn't synced yet would read stale/incomplete numbers;
+      // the snapshot will pick this up once the queue drains and a
+      // later recompute call (or the next verification) runs.
+      if (shopId && !queued) recomputeTodaySnapshot(shopId);
     } catch (err) {
       console.warn("Failed to verify session:", err);
       // Re-sync from server in case of partial failure / stale local state.
@@ -179,6 +208,8 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
         <Text style={styles.headerCount}>{sessions.length}</Text>
       </View>
 
+      <SyncStatusBanner {...networkStatus} />
+
       {permissionState === "denied" && (
         <View style={styles.permissionBanner}>
           <Text style={styles.permissionText}>
@@ -232,6 +263,7 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
           customerName={verifiedFlash.customerName}
           amount={verifiedFlash.amount}
           source={verifiedFlash.source}
+          queued={verifiedFlash.queued}
           onDone={() => setVerifiedFlash(null)}
         />
       )}

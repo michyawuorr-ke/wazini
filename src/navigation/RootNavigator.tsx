@@ -12,6 +12,7 @@ import CustomerDetailScreen from "../screens/CustomerDetailScreen";
 import PaymentSettingsScreen from "../screens/PaymentSettingsScreen";
 import ServicesSettingsScreen from "../screens/ServicesSettingsScreen";
 import SettingsMenuScreen from "../screens/SettingsMenuScreen";
+import ManualCheckinScreen from "../screens/ManualCheckinScreen";
 
 /**
  * NOTE ON THE "2-TAB LAW": this app uses a single native-stack navigator
@@ -29,6 +30,7 @@ export type RootStackParamList = {
   Business: undefined;
   Customers: undefined;
   CustomerDetail: { customerId: string };
+  ManualCheckin: undefined;
   SettingsMenu: undefined;
   PaymentSettings: undefined;
   ServicesSettings: undefined;
@@ -56,6 +58,9 @@ export default function RootNavigator() {
           component={BusinessScreen}
           options={({ navigation }) => ({
             title: "Business",
+            headerLeft: () => (
+              <CheckInButton onPress={() => navigation.navigate("ManualCheckin")} />
+            ),
             headerRight: () => (
               <SettingsGearButton onPress={() => navigation.navigate("SettingsMenu")} />
             ),
@@ -70,6 +75,11 @@ export default function RootNavigator() {
           name="CustomerDetail"
           component={CustomerDetailScreen}
           options={{ title: "Customer" }}
+        />
+        <Stack.Screen
+          name="ManualCheckin"
+          component={ManualCheckinScreen}
+          options={{ title: "Check In Customer" }}
         />
         <Stack.Screen
           name="SettingsMenu"
@@ -88,6 +98,18 @@ export default function RootNavigator() {
         />
       </Stack.Navigator>
     </NavigationContainer>
+  );
+}
+
+function CheckInButton({ onPress }: { onPress: () => void }) {
+  // Header-left, opposite the settings gear (header-right) — this is a
+  // daily-use action (every connectivity-less walk-in needs it), not
+  // setup/config, so it gets a more prominent "+" affordance rather
+  // than living inside the settings menu alongside Payment/Services.
+  return (
+    <Pressable onPress={onPress} hitSlop={spacing.sm} style={{ paddingHorizontal: spacing.xs }}>
+      <Text style={{ fontSize: 22, color: colors.textPrimary, fontWeight: "600" }}>+</Text>
+    </Pressable>
   );
 }
 
