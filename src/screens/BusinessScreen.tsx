@@ -59,12 +59,33 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
 
   useEffect(() => {
     (async () => {
-      const id = await getStoredShopId();
-      setShopId(id);
-      if (id) await loadSessions(id);
-      setLoading(false);
+      try {
+        const id = await getStoredShopId();
+        setShopId(id);
+        if (id) await loadSessions(id);
+      } catch (err) {
+        console.warn("Failed to initialize Business screen:", err);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [loadSessions]);
+
+  // Tracks whether THIS screen is currently the visible/focused one —
+  // used to gate the realtime connection below so it only stays open
+  // while the barber is actually looking at the queue, not for the
+  // lifetime of the component (React Navigation keeps prior screens
+  // mounted in its stack by default, so without this, navigating to
+  // Customers would leave the Business tab's realtime connection open
+  // in the background needlessly). See useSessionRealtimeSubscription.ts
+  // "COST NOTE" for why this matters at multi-user, multi-shop scale.
+  const [isFocused, setIsFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, [])
+  );
 
   // Refresh the queue every time this screen regains focus — covers the
   // case where a customer just checked in via the web app while the
@@ -85,12 +106,16 @@ export default function BusinessScreen(_props: ScreenProps<"Business">) {
   // immediately followed by an SMS-triggered verify) would otherwise
   // trigger back-to-back redundant fetches.
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useSessionRealtimeSubscription(shopId, () => {
-    if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
-    realtimeDebounceRef.current = setTimeout(() => {
-      if (shopId) loadSessions(shopId);
-    }, 250);
-  });
+  useSessionRealtimeSubscription(
+    shopId,
+    () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      realtimeDebounceRef.current = setTimeout(() => {
+        if (shopId) loadSessions(shopId);
+      }, 250);
+    },
+    isFocused
+  );
 
   const handleRefresh = async () => {
     if (!shopId) return;

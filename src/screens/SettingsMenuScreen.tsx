@@ -1,15 +1,46 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { colors, radius, spacing, typography } from "../theme/tokens";
+import { getMyShops } from "../lib/auth";
 import type { ScreenProps } from "../navigation/RootNavigator";
 
 /**
- * Deliberately tiny — two entries. This exists only because the gear
- * icon now has two destinations (Payment Settings, Services & Prices)
- * instead of one. It is not a dashboard and should not grow beyond a
- * short list of genuine setup/config screens — daily-use actions belong
- * on the Business or Customers tab, never here.
+ * Deliberately small. "Manage Barbers" and "Business Health" are
+ * owner-only — genuinely hidden from barbers here, not just blocked
+ * server-side, per the explicit decision that barbers should not see
+ * Business Health at all. The RLS policies from migration 013 are
+ * still the REAL enforcement boundary (a barber could never read this
+ * data even by hitting the API directly) — this UI-level hide is an
+ * additional, deliberate layer for the specific "barbers shouldn't even
+ * know this exists" requirement, not a replacement for the database-
+ * level guarantee.
  */
 export default function SettingsMenuScreen({ navigation }: ScreenProps<"SettingsMenu">) {
+  const [isOwner, setIsOwner] = useState<boolean | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          const shops = await getMyShops();
+          setIsOwner(shops.some((s) => s.role === "owner"));
+        } catch (err) {
+          console.warn("Failed to determine role:", err);
+          setIsOwner(false);
+        }
+      })();
+    }, [])
+  );
+
+  if (isOwner === null) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={colors.ink} />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Pressable
@@ -20,13 +51,33 @@ export default function SettingsMenuScreen({ navigation }: ScreenProps<"Settings
         <Text style={styles.chevron}>›</Text>
       </Pressable>
 
-      <Pressable
-        style={styles.row}
-        onPress={() => navigation.navigate("PaymentSettings")}
-      >
-        <Text style={styles.label}>Payment Settings</Text>
-        <Text style={styles.chevron}>›</Text>
-      </Pressable>
+      {isOwner && (
+        <>
+          <Pressable
+            style={styles.row}
+            onPress={() => navigation.navigate("PaymentSettings")}
+          >
+            <Text style={styles.label}>Payment Settings</Text>
+            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.row}
+            onPress={() => navigation.navigate("ManageBarbers")}
+          >
+            <Text style={styles.label}>Manage Barbers</Text>
+            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.row}
+            onPress={() => navigation.navigate("BusinessHealth")}
+          >
+            <Text style={styles.label}>Business Health</Text>
+            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }
@@ -36,6 +87,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.paper,
     padding: spacing.lg,
+  },
+  centered: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.paper,
   },
   row: {
     flexDirection: "row",

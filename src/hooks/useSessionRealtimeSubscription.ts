@@ -29,10 +29,23 @@ type SessionChangeHandler = (event: {
  * the queue correct even in scenarios this app has no other way of
  * knowing about, e.g. a second barber phone verifying a session, or
  * the customer web app creating a brand new check-in.
+ *
+ * COST NOTE (added after real-world multi-user scoping discussion):
+ * each open realtime connection is billed/counted by Supabase. With
+ * owner + multiple barbers all potentially running this app
+ * simultaneously per shop, an always-on connection (mount-to-unmount,
+ * regardless of whether the Business tab is actually visible) wastes
+ * connections at scale — React Navigation typically keeps prior screens
+ * mounted in its stack, so navigating to Customers does NOT unmount
+ * Business by default. The `enabled` param lets the calling screen tie
+ * this connection to actual screen focus (useFocusEffect) instead of
+ * component lifecycle, closing the connection the moment the user
+ * isn't looking at this screen, not just when they fully leave it.
  */
 export function useSessionRealtimeSubscription(
   shopId: string | null,
-  onChange: SessionChangeHandler
+  onChange: SessionChangeHandler,
+  enabled: boolean = true
 ) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   // Keep the latest callback in a ref so the subscription effect below
@@ -44,7 +57,7 @@ export function useSessionRealtimeSubscription(
   onChangeRef.current = onChange;
 
   useEffect(() => {
-    if (!shopId) return;
+    if (!shopId || !enabled) return;
 
     const channel = supabase
       .channel(`session-changes-${shopId}`)
@@ -82,5 +95,5 @@ export function useSessionRealtimeSubscription(
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [shopId]);
+  }, [shopId, enabled]);
 }

@@ -21,10 +21,19 @@ export default function CustomersScreen({ navigation }: ScreenProps<"Customers">
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        const shopId = await getStoredShopId();
-        if (!shopId) return;
-        const data = await getCustomers(shopId);
-        setCustomers(data);
+        try {
+          const shopId = await getStoredShopId();
+          if (!shopId) return;
+          const data = await getCustomers(shopId);
+          setCustomers(data);
+        } catch (err) {
+          // Never let a data-loading failure crash the whole app — see
+          // the same defensive pattern in BusinessScreen.loadSessions.
+          // This screen's own crash (flashing and closing) before this
+          // fix was traced to an unhandled rejection here propagating
+          // uncaught through useFocusEffect's async IIFE.
+          console.warn("Failed to load customers:", err);
+        }
       })();
     }, [])
   );

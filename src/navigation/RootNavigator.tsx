@@ -13,6 +13,8 @@ import PaymentSettingsScreen from "../screens/PaymentSettingsScreen";
 import ServicesSettingsScreen from "../screens/ServicesSettingsScreen";
 import SettingsMenuScreen from "../screens/SettingsMenuScreen";
 import ManualCheckinScreen from "../screens/ManualCheckinScreen";
+import ManageBarbersScreen from "../screens/ManageBarbersScreen";
+import BusinessHealthScreen from "../screens/BusinessHealthScreen";
 
 /**
  * NOTE ON THE "2-TAB LAW": this app uses a single native-stack navigator
@@ -34,6 +36,8 @@ export type RootStackParamList = {
   SettingsMenu: undefined;
   PaymentSettings: undefined;
   ServicesSettings: undefined;
+  ManageBarbers: undefined;
+  BusinessHealth: undefined;
 };
 
 export type ScreenProps<T extends keyof RootStackParamList> =
@@ -95,6 +99,16 @@ export default function RootNavigator() {
           name="ServicesSettings"
           component={ServicesSettingsScreen}
           options={{ title: "Services & Prices" }}
+        />
+        <Stack.Screen
+          name="ManageBarbers"
+          component={ManageBarbersScreen}
+          options={{ title: "Manage Barbers" }}
+        />
+        <Stack.Screen
+          name="BusinessHealth"
+          component={BusinessHealthScreen}
+          options={{ title: "Business Health" }}
         />
       </Stack.Navigator>
     </NavigationContainer>

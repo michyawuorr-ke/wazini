@@ -78,6 +78,24 @@ export interface RepeatCustomerRate {
   repeat_rate: number | null;
 }
 
+export type ShopRole = "owner" | "barber";
+
+export interface ShopMember {
+  id: string;
+  shop_id: string;
+  user_id: string;
+  role: ShopRole;
+  joined_at: string;
+  invited_by: string | null;
+}
+
+/** What the app actually needs after login: which shop, and what role in it. */
+export interface MyShopMembership {
+  shop_id: string;
+  shop_name: string;
+  role: ShopRole;
+}
+
 export interface Shop {
   id: string;
   name: string;

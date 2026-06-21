@@ -33,21 +33,36 @@ export default function ManualCheckinScreen({ navigation }: ScreenProps<"ManualC
   const [services, setServices] = useState<ServicePrice[]>([]);
   const [selectedService, setSelectedService] = useState<ServicePrice | null>(null);
 
+  // "Custom" is a one-off, this-visit-only service name + price — per
+  // real feedback from barbers: a customer occasionally wants something
+  // not on the menu. This does NOT touch service_price (the shared,
+  // owner-managed list) at all — it writes straight to
+  // session.service_name / amount_expected as a plain snapshot, exactly
+  // like a menu-selected service does. Picking "Custom" deselects any
+  // menu service and vice versa — only one service source per check-in.
+  const [isCustom, setIsCustom] = useState(false);
+  const [customServiceName, setCustomServiceName] = useState("");
+  const [customPrice, setCustomPrice] = useState("");
+
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const id = await getStoredShopId();
-      if (!id) return;
-      setShopId(id);
-      const [shopData, serviceData] = await Promise.all([
-        getShop(id),
-        getServicePrices(id),
-      ]);
-      setShop(shopData);
-      setServices(serviceData);
+      try {
+        const id = await getStoredShopId();
+        if (!id) return;
+        setShopId(id);
+        const [shopData, serviceData] = await Promise.all([
+          getShop(id),
+          getServicePrices(id),
+        ]);
+        setShop(shopData);
+        setServices(serviceData);
+      } catch (err) {
+        console.warn("Failed to load shop/services for check-in:", err);
+      }
     })();
   }, []);
 
@@ -60,9 +75,30 @@ export default function ManualCheckinScreen({ navigation }: ScreenProps<"ManualC
   };
 
   const handleSubmit = async () => {
-    if (!shopId || !shop || !selectedService) {
-      Alert.alert("Missing info", "Select a service before checking in this customer.");
-      return;
+    if (!shopId || !shop) return;
+
+    let finalServiceName: string;
+    let finalAmount: number;
+
+    if (isCustom) {
+      const trimmedName = customServiceName.trim();
+      const parsedPrice = parseInt(customPrice, 10);
+      if (!trimmedName || !parsedPrice || parsedPrice <= 0) {
+        Alert.alert(
+          "Missing custom service info",
+          "Enter a name and a price greater than 0 for the custom service."
+        );
+        return;
+      }
+      finalServiceName = trimmedName;
+      finalAmount = parsedPrice;
+    } else {
+      if (!selectedService) {
+        Alert.alert("Missing info", "Select a service before checking in this customer.");
+        return;
+      }
+      finalServiceName = selectedService.name;
+      finalAmount = selectedService.price;
     }
 
     const normalizedPhone = normalizePhone(customerPhone);
@@ -85,8 +121,8 @@ export default function ManualCheckinScreen({ navigation }: ScreenProps<"ManualC
         shopId,
         customerPhone: normalizedPhone,
         customerName: customerName.trim(),
-        serviceName: selectedService.name,
-        amountExpected: selectedService.price,
+        serviceName: finalServiceName,
+        amountExpected: finalAmount,
         paymentType: shop.payment_type,
         paymentNumber: shop.payment_number,
         paybillAccount: shop.paybill_account,
@@ -114,12 +150,15 @@ export default function ManualCheckinScreen({ navigation }: ScreenProps<"ManualC
       <Text style={styles.label}>Service</Text>
       <View style={styles.serviceGrid}>
         {services.map((service) => {
-          const isSelected = selectedService?.id === service.id;
+          const isSelected = !isCustom && selectedService?.id === service.id;
           return (
             <Pressable
               key={service.id}
               style={[styles.serviceChip, isSelected && styles.serviceChipSelected]}
-              onPress={() => setSelectedService(service)}
+              onPress={() => {
+                setIsCustom(false);
+                setSelectedService(service);
+              }}
             >
               <Text
                 style={[styles.serviceChipName, isSelected && styles.serviceChipNameSelected]}
@@ -134,11 +173,49 @@ export default function ManualCheckinScreen({ navigation }: ScreenProps<"ManualC
             </Pressable>
           );
         })}
+        <Pressable
+          style={[styles.serviceChip, isCustom && styles.serviceChipSelected]}
+          onPress={() => {
+            setIsCustom(true);
+            setSelectedService(null);
+          }}
+        >
+          <Text style={[styles.serviceChipName, isCustom && styles.serviceChipNameSelected]}>
+            Custom
+          </Text>
+          <Text style={[styles.serviceChipPrice, isCustom && styles.serviceChipNameSelected]}>
+            One-off price
+          </Text>
+        </Pressable>
       </View>
-      {services.length === 0 && (
+      {services.length === 0 && !isCustom && (
         <Text style={styles.emptyServicesNote}>
-          No services set up yet. Add some under Settings → Services & Prices first.
+          No services set up yet. Add some under Settings → Services & Prices, or use Custom
+          for this visit.
         </Text>
+      )}
+
+      {isCustom && (
+        <View style={styles.customServiceBlock}>
+          <TextInput
+            style={styles.input}
+            value={customServiceName}
+            onChangeText={setCustomServiceName}
+            placeholder="What did they get? e.g. Custom fade + design"
+            placeholderTextColor={colors.textSecondary}
+          />
+          <TextInput
+            style={[styles.input, styles.customPriceInput]}
+            value={customPrice}
+            onChangeText={setCustomPrice}
+            placeholder="Price (KES)"
+            placeholderTextColor={colors.textSecondary}
+            keyboardType="number-pad"
+          />
+          <Text style={styles.customServiceNote}>
+            This is just for this visit — it won't be added to your shop's price list.
+          </Text>
+        </View>
       )}
 
       <Text style={styles.label}>Customer Name</Text>
@@ -224,6 +301,17 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
     marginTop: spacing.sm,
+  },
+  customServiceBlock: {
+    marginTop: spacing.md,
+  },
+  customPriceInput: {
+    marginTop: spacing.sm,
+  },
+  customServiceNote: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
   },
   input: {
     borderWidth: 1,

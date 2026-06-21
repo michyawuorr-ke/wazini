@@ -41,10 +41,14 @@ export default function ServicesSettingsScreen(_props: ScreenProps<"ServicesSett
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        const id = await getStoredShopId();
-        if (!id) return;
-        setShopId(id);
-        await loadServices(id);
+        try {
+          const id = await getStoredShopId();
+          if (!id) return;
+          setShopId(id);
+          await loadServices(id);
+        } catch (err) {
+          console.warn("Failed to load services:", err);
+        }
       })();
     }, [loadServices])
   );

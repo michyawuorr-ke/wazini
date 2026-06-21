@@ -16,8 +16,14 @@ export default function CustomerDetailScreen({ route }: ScreenProps<"CustomerDet
 
   useEffect(() => {
     (async () => {
-      const data = await getCustomerSessionHistory(customerId);
-      setHistory(data);
+      try {
+        const data = await getCustomerSessionHistory(customerId);
+        setHistory(data);
+      } catch (err) {
+        // Same defensive pattern as CustomersScreen/BusinessScreen —
+        // never let a data-loading failure crash the app.
+        console.warn("Failed to load customer history:", err);
+      }
     })();
   }, [customerId]);
 

@@ -30,13 +30,17 @@ export default function PaymentSettingsScreen(_props: ScreenProps<"PaymentSettin
 
   useEffect(() => {
     (async () => {
-      const id = await getStoredShopId();
-      if (!id) return;
-      setShopId(id);
-      const shop = await getShop(id);
-      setPaymentType(shop.payment_type);
-      setPaymentNumber(shop.payment_number);
-      setPaybillAccount(shop.paybill_account ?? "");
+      try {
+        const id = await getStoredShopId();
+        if (!id) return;
+        setShopId(id);
+        const shop = await getShop(id);
+        setPaymentType(shop.payment_type);
+        setPaymentNumber(shop.payment_number);
+        setPaybillAccount(shop.paybill_account ?? "");
+      } catch (err) {
+        console.warn("Failed to load payment settings:", err);
+      }
     })();
   }, []);
 

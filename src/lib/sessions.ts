@@ -188,7 +188,7 @@ export async function getCustomers(shopId: string): Promise<Customer[]> {
     .from("customer")
     .select("*")
     .eq("shop_id", shopId)
-    .order("last_visit_at", { ascending: false, nullsFirst: false });
+    .order("last_visit_at", { ascending: false });
 
   if (error) throw error;
   return data ?? [];
