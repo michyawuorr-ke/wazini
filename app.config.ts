@@ -69,8 +69,6 @@ const config: ExpoConfig = {
           // rather than requiring it to be conclusively proven.
           // Revisit this cap once API 36 has wider real-device
           // adoption and tooling maturity.
-          targetSdkVersion: 34,
-          compileSdkVersion: 34,
         },
       },
     ],
@@ -82,7 +80,7 @@ const config: ExpoConfig = {
     eas: {
       // Filled in automatically the first time you run `eas build`
       // (or `eas init`) from Termux — do not hand-edit.
-      projectId: process.env.EAS_PROJECT_ID,
+      projectId: "16b321fe-dd8b-4c00-a1c4-b1a6cc27ba7b",
     },
   },
 };
