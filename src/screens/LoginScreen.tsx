@@ -17,7 +17,7 @@ interface LoginScreenProps {
   onLoggedIn: () => void;
 }
 
-function normalizePhone(raw: string): string | null {
+function normalizeEmail(raw: string): string | null {
   const digits = raw.replace(/\D/g, "");
   if (digits.startsWith("254") && digits.length === 12) return `+${digits}`;
   if (digits.startsWith("0") && digits.length === 10) return `+254${digits.slice(1)}`;
@@ -26,31 +26,31 @@ function normalizePhone(raw: string): string | null {
 }
 
 /**
- * Real authentication entry point — phone number + OTP, replacing the
+ * Real authentication entry point — email number + OTP, replacing the
  * old "paste in a shop UUID" Setup screen entirely. Matches the exact
  * login pattern Kenyan users already trust from M-Pesa itself: no
- * email, no password, no account-creation friction beyond a phone
+ * email, no password, no account-creation friction beyond a email
  * number they already know by heart.
  *
  * Works identically whether this is someone's first time (new owner)
- * or returning — Supabase phone-OTP auth treats both the same; the
+ * or returning — Supabase email-OTP auth treats both the same; the
  * distinction between "set up a new shop" and "join via invite code"
  * happens AFTER login, in PostLoginRouterScreen, based on whether
  * get_my_shops() returns anything for this user yet.
  */
 export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  const [stage, setStage] = useState<"phone" | "otp">("phone");
-  const [normalizedPhone, setNormalizedPhone] = useState("");
+  const [stage, setStage] = useState<"email" | "otp">("email");
+  const [normalizedEmail, setNormalizedEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSendOtp = async () => {
-    const normalized = normalizePhone(phone);
+    const normalized = normalizeEmail(email);
     if (!normalized) {
       Alert.alert(
-        "Check the phone number",
-        "Enter a valid Kenyan number, e.g. 0712345678 or 254712345678."
+        "Check the email number",
+        "Enter a valid Kenyan number, e.g. you@gmail.com"
       );
       return;
     }
@@ -58,7 +58,7 @@ export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
     setSubmitting(true);
     try {
       await sendOtp(normalized);
-      setNormalizedPhone(normalized);
+      setNormalizedEmail(normalized);
       setStage("otp");
     } catch (err) {
       Alert.alert("Couldn't send code", "Check your connection and try again.");
@@ -71,7 +71,7 @@ export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
     if (!otp.trim()) return;
     setSubmitting(true);
     try {
-      await verifyOtp(normalizedPhone, otp.trim());
+      await verifyOtp(normalizedEmail, otp.trim());
       onLoggedIn();
     } catch (err) {
       Alert.alert("That code didn't work", "Check the code and try again, or request a new one.");
@@ -88,24 +88,24 @@ export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
       <View style={styles.content}>
         <Text style={styles.title}>Wazini</Text>
 
-        {stage === "phone" ? (
+        {stage === "email" ? (
           <>
             <Text style={styles.subtitle}>
-              Enter your phone number to sign in or set up your shop.
+              Enter your email number to sign in or set up your shop.
             </Text>
             <TextInput
               style={styles.input}
-              value={phone}
-              onChangeText={setPhone}
-              placeholder="e.g. 0712345678"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="e.g. you@gmail.com"
               placeholderTextColor={colors.textSecondary}
-              keyboardType="phone-pad"
+              keyboardType="email-address"
               autoFocus
             />
             <Pressable
-              style={[styles.button, (!phone.trim() || submitting) && styles.buttonDisabled]}
+              style={[styles.button, (!email.trim() || submitting) && styles.buttonDisabled]}
               onPress={handleSendOtp}
-              disabled={!phone.trim() || submitting}
+              disabled={!email.trim() || submitting}
             >
               {submitting ? (
                 <ActivityIndicator color={colors.textOnDark} />
@@ -117,7 +117,7 @@ export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
         ) : (
           <>
             <Text style={styles.subtitle}>
-              Enter the code sent to {normalizedPhone}.
+              Enter the code sent to {normalizedEmail}.
             </Text>
             <TextInput
               style={styles.input}
@@ -139,7 +139,7 @@ export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
                 <Text style={styles.buttonLabel}>Verify & Continue</Text>
               )}
             </Pressable>
-            <Pressable style={styles.linkButton} onPress={() => setStage("phone")}>
+            <Pressable style={styles.linkButton} onPress={() => setStage("email")}>
               <Text style={styles.linkLabel}>Use a different number</Text>
             </Pressable>
           </>

@@ -9,19 +9,19 @@ import type { MyShopMembership, ShopRole, PaymentType } from "../types/domain";
  * entered ID.
  */
 
-export async function sendOtp(phone: string): Promise<void> {
+export async function sendOtp(email: string): Promise<void> {
   // Supabase expects E.164 format — caller is responsible for
   // normalizing (see normalizePhone in ManualCheckinScreen for the
   // same pattern already used elsewhere in this codebase).
-  const { error } = await supabase.auth.signInWithOtp({ phone });
+  const { error } = await supabase.auth.signInWithOtp({ email: email });
   if (error) throw error;
 }
 
-export async function verifyOtp(phone: string, token: string): Promise<void> {
+export async function verifyOtp(email: string, token: string): Promise<void> {
   const { error } = await supabase.auth.verifyOtp({
-    phone,
+    email: email,
     token,
-    type: "sms",
+    type: "email",
   });
   if (error) throw error;
 }
