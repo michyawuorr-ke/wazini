@@ -11,70 +11,30 @@ import {
   View,
 } from "react-native";
 import { colors, radius, spacing, typography } from "../theme/tokens";
-import { sendOtp, verifyOtp } from "../lib/auth";
+import { sendOtp } from "../lib/auth";
 
 interface LoginScreenProps {
   onLoggedIn: () => void;
 }
 
-function normalizeEmail(raw: string): string | null {
-  const digits = raw.replace(/\D/g, "");
-  if (digits.startsWith("254") && digits.length === 12) return `+${digits}`;
-  if (digits.startsWith("0") && digits.length === 10) return `+254${digits.slice(1)}`;
-  if (digits.startsWith("7") && digits.length === 9) return `+254${digits}`;
-  return null;
-}
-
-/**
- * Real authentication entry point — email number + OTP, replacing the
- * old "paste in a shop UUID" Setup screen entirely. Matches the exact
- * login pattern Kenyan users already trust from M-Pesa itself: no
- * email, no password, no account-creation friction beyond a email
- * number they already know by heart.
- *
- * Works identically whether this is someone's first time (new owner)
- * or returning — Supabase email-OTP auth treats both the same; the
- * distinction between "set up a new shop" and "join via invite code"
- * happens AFTER login, in PostLoginRouterScreen, based on whether
- * get_my_shops() returns anything for this user yet.
- */
 export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
   const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
-  const [stage, setStage] = useState<"email" | "otp">("email");
-  const [normalizedEmail, setNormalizedEmail] = useState("");
+  const [sent, setSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSendOtp = async () => {
-    const normalized = normalizeEmail(email);
-    if (!normalized) {
-      Alert.alert(
-        "Check the email number",
-        "Enter a valid Kenyan number, e.g. you@gmail.com"
-      );
+  const handleSend = async () => {
+    const trimmed = email.trim().toLowerCase();
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+    if (!valid) {
+      Alert.alert("Check your email", "Enter a valid email address.");
       return;
     }
-
     setSubmitting(true);
     try {
-      await sendOtp(normalized);
-      setNormalizedEmail(normalized);
-      setStage("otp");
+      await sendOtp(trimmed);
+      setSent(true);
     } catch (err) {
-      Alert.alert("Couldn't send code", "Check your connection and try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (!otp.trim()) return;
-    setSubmitting(true);
-    try {
-      await verifyOtp(normalizedEmail, otp.trim());
-      onLoggedIn();
-    } catch (err) {
-      Alert.alert("That code didn't work", "Check the code and try again, or request a new one.");
+      Alert.alert("Couldn't send link", "Check your connection and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -88,10 +48,10 @@ export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
       <View style={styles.content}>
         <Text style={styles.title}>Wazini</Text>
 
-        {stage === "email" ? (
+        {!sent ? (
           <>
             <Text style={styles.subtitle}>
-              Enter your email number to sign in or set up your shop.
+              Enter your email address to sign in or set up your shop.
             </Text>
             <TextInput
               style={styles.input}
@@ -100,47 +60,32 @@ export default function LoginScreen({ onLoggedIn }: LoginScreenProps) {
               placeholder="e.g. you@gmail.com"
               placeholderTextColor={colors.textSecondary}
               keyboardType="email-address"
+              autoCapitalize="none"
               autoFocus
             />
             <Pressable
               style={[styles.button, (!email.trim() || submitting) && styles.buttonDisabled]}
-              onPress={handleSendOtp}
+              onPress={handleSend}
               disabled={!email.trim() || submitting}
             >
               {submitting ? (
                 <ActivityIndicator color={colors.textOnDark} />
               ) : (
-                <Text style={styles.buttonLabel}>Send Code</Text>
+                <Text style={styles.buttonLabel}>Send Sign-in Link</Text>
               )}
             </Pressable>
           </>
         ) : (
           <>
             <Text style={styles.subtitle}>
-              Enter the code sent to {normalizedEmail}.
+              Check your email — we sent a sign-in link to {email.trim()}.
             </Text>
-            <TextInput
-              style={styles.input}
-              value={otp}
-              onChangeText={setOtp}
-              placeholder="6-digit code"
-              placeholderTextColor={colors.textSecondary}
-              keyboardType="number-pad"
-              autoFocus
-            />
-            <Pressable
-              style={[styles.button, (!otp.trim() || submitting) && styles.buttonDisabled]}
-              onPress={handleVerifyOtp}
-              disabled={!otp.trim() || submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator color={colors.textOnDark} />
-              ) : (
-                <Text style={styles.buttonLabel}>Verify & Continue</Text>
-              )}
-            </Pressable>
-            <Pressable style={styles.linkButton} onPress={() => setStage("email")}>
-              <Text style={styles.linkLabel}>Use a different number</Text>
+            <Text style={styles.hint}>
+              Tap the link in the email to open Wazini and sign in. If you don't see it,
+              check your spam folder.
+            </Text>
+            <Pressable style={styles.linkButton} onPress={() => setSent(false)}>
+              <Text style={styles.linkLabel}>Use a different email</Text>
             </Pressable>
           </>
         )}
@@ -160,16 +105,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   title: {
-    ...typography.display,
     fontSize: 40,
+    fontWeight: "700",
     color: colors.ink,
     marginBottom: spacing.lg,
   },
   subtitle: {
-    ...typography.body,
+    fontSize: 16,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+    lineHeight: 24,
+  },
+  hint: {
+    fontSize: 14,
+    color: colors.textSecondary,
     lineHeight: 22,
+    marginBottom: spacing.xl,
   },
   input: {
     borderWidth: 1,
@@ -190,7 +141,8 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   buttonLabel: {
-    ...typography.label,
+    fontSize: 16,
+    fontWeight: "600",
     color: colors.textOnDark,
   },
   linkButton: {
@@ -198,7 +150,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   linkLabel: {
-    ...typography.caption,
+    fontSize: 14,
     color: colors.textSecondary,
   },
 });
